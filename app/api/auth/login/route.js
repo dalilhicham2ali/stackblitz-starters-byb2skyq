@@ -1,38 +1,48 @@
+// app/api/auth/login/route.js
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { getIronSession } from 'iron-session';
+import { sessionOptions } from '@/lib/session';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import bcrypt from 'bcryptjs';
-import { sessionOptions } from '@/lib/session';
+import { withIronSessionApiRoute } from 'iron-session/next';
 
-export async function POST(request) {
+async function handler(req, res) {
   try {
-    const { email, password } = await request.json();
-    
+    // Vérifiez si la méthode est POST
+    if (req.method !== 'POST') {
+      return res.status(405).json({ error: 'Méthode non autorisée' });
+    }
+
+    const { email, password } = req.body;
+
+    // Recherchez l'utilisateur dans Firestore
     const usersRef = collection(db, 'users');
     const q = query(usersRef, where('email', '==', email));
     const querySnapshot = await getDocs(q);
-    
+
     if (querySnapshot.empty) {
-      return NextResponse.json({ error: 'Utilisateur non trouvé' }, { status: 404 });
+      return res.status(404).json({ error: 'Utilisateur non trouvé' });
     }
 
     const userDoc = querySnapshot.docs[0];
     const user = userDoc.data();
-    
+
+    // Vérifiez le mot de passe
     const isValid = await bcrypt.compare(password, user.password);
-    
     if (!isValid) {
-      return NextResponse.json({ error: 'Mot de passe incorrect' }, { status: 401 });
+      return res.status(401).json({ error: 'Mot de passe incorrect' });
     }
 
-    const session = await getIronSession(cookies(), sessionOptions);
-    session.user = { id: userDoc.id, email: user.email };
-    await session.save();
+    // Ajoutez les données utilisateur à la session
+    req.session.user = { id: userDoc.id, email: user.email };
+    await req.session.save();
 
-    return NextResponse.json({ success: true });
+    return res.status(200).json({ success: true });
   } catch (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('Erreur lors de la connexion :', error);
+    return res.status(500).json({ error: 'Erreur serveur' });
   }
 }
+
+// Ajoutez `withIronSessionApiRoute` pour gérer la session
+export default withIronSessionApiRoute(handler, sessionOptions);
